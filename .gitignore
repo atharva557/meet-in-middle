@@ -1,0 +1,9 @@
+node_modules
+dist
+# Raw Overpass downloads (large; regenerate with `npm run fetch-city`)
+data/raw
+# Local secrets, e.g. a future VITE_GOOGLE_MAPS_KEY
+.env.local
+.env.*.local
+# Editor / agent tooling
+.claude

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#07080c" />
+    <meta name="description" content="Find the fairest place for your friends to meet in Ahmedabad, and watch Dijkstra's algorithm race across the real road network." />
+    <title>Meet in the Middle · Ahmedabad</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='10' cy='16' r='8' fill='%2322d3ee' fill-opacity='.8'/%3E%3Ccircle cx='22' cy='16' r='8' fill='%23f472b6' fill-opacity='.8'/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <div id="map" aria-label="Map"></div>
+
+    <!-- Friend input -->
+    <section id="panel" class="sheet" aria-label="Friends">
+      <button class="sheet-grip" id="panel-grip" aria-label="Expand or collapse"></button>
+      <header class="brand">
+        <div class="brand-mark" aria-hidden="true"><i></i><i></i></div>
+        <div>
+          <h1>Meet in the Middle</h1>
+          <p class="sub">Ahmedabad · by car</p>
+        </div>
+      </header>
+      <div class="panel-body">
+        <ol id="friend-list" class="friends"></ol>
+        <div class="row-actions">
+          <button id="add-friend" class="ghost">+ Add friend</button>
+          <button id="demo" class="ghost subtle">Try a demo</button>
+        </div>
+        <fieldset class="modes">
+          <legend>What’s fair?</legend>
+          <div class="seg" id="mode-seg" role="radiogroup"></div>
+          <p class="mode-blurb" id="mode-blurb"></p>
+        </fieldset>
+        <p class="fine">Roads &amp; places © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors. Travel times are estimates from road type and speed limits, not live traffic.</p>
+      </div>
+      <footer class="panel-foot">
+        <p id="panel-error" class="error" role="alert" hidden></p>
+        <button id="go" class="primary" disabled>Find the fair middle</button>
+      </footer>
+    </section>
+
+    <!-- Pin-drop hint -->
+    <div id="pin-hint" class="toast" hidden>Tap the map to place <b></b> <button class="link" id="pin-cancel">Cancel</button></div>
+
+    <!-- Loading -->
+    <div id="loading" class="toast loading" hidden><span class="spinner" aria-hidden="true"></span><span id="loading-text">Loading…</span></div>
+
+    <!-- Animation HUD -->
+    <div id="hud" class="hud" hidden>
+      <div class="clock"><span id="hud-time">0</span><small>min</small></div>
+      <div class="hud-count"><span id="hud-nodes">0</span> road nodes settled by Dijkstra</div>
+    </div>
+
+    <!-- Playback controls -->
+    <div id="controls" class="controls" hidden>
+      <button id="btn-edit" class="icon" title="Edit friends" aria-label="Edit friends">
+        <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4Z" /></svg>
+      </button>
+      <button id="btn-replay" class="icon" title="Replay" aria-label="Replay">
+        <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4" /></svg>
+      </button>
+      <label class="speed">
+        <span class="sr">Speed</span>
+        <input id="speed" type="range" min="0.25" max="3" step="0.25" value="1" />
+        <output id="speed-out">1×</output>
+      </label>
+      <button id="btn-skip" class="icon" title="Skip to result" aria-label="Skip to result">
+        <svg viewBox="0 0 24 24"><path d="M5 5l8 7-8 7V5Zm9 0h3v14h-3" /></svg>
+      </button>
+    </div>
+
+    <!-- Result -->
+    <section id="result" class="sheet result" aria-label="Result" hidden>
+      <button class="sheet-grip" id="result-grip" aria-label="Expand or collapse"></button>
+      <div class="result-head">
+        <p class="eyebrow" id="r-kind">Meet at</p>
+        <h2 id="r-name">—</h2>
+        <p class="r-summary" id="r-summary"></p>
+      </div>
+      <ul class="trips" id="r-trips"></ul>
+      <div class="seg small" id="r-mode-seg" role="radiogroup" aria-label="Fairness mode"></div>
+      <p class="mode-blurb" id="r-mode-blurb"></p>
+      <div id="r-alts" class="alts"></div>
+      <div class="result-actions">
+        <button id="r-share" class="primary">Share result</button>
+        <a id="r-maps" class="ghost" target="_blank" rel="noopener">Open in Maps</a>
+      </div>
+    </section>
+
+    <div id="snack" class="snack" role="status" hidden></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
