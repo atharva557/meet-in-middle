@@ -1,5 +1,7 @@
 # Meet in the Middle · Ahmedabad
 
+**Live:** https://atharva557.github.io/meet-in-middle/ · [try the demo group](https://atharva557.github.io/meet-in-middle/#m=max&f=Aarav@23.0216,72.4712&f=Diya@22.9990,72.6030&f=Kabir@23.1085,72.5865)
+
 Friends enter where they live; the app finds the fairest café, restaurant or mall to meet at,
 and replays **Dijkstra's algorithm** running on Ahmedabad's real road network as a colored wave per friend.
 Where the waves overlap, venues light up; the winner pulses and everyone's route is traced in.
