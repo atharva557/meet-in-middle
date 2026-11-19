@@ -2,20 +2,22 @@
 // then a finale (dim → winner → routes → result card), driven by requestAnimationFrame.
 
 export interface ShowHooks {
-  /** Called every frame during the wave phase with the simulation time in seconds. */
-  wave(sim: number): void;
+  /** Called every frame during the wave phase: simulation time (s) and progress 0→1. */
+  wave(sim: number, progress: number): void;
   /** Called every frame of the finale with elapsed ms since it started (clamped to FINALE_MS). */
   finale(ms: number): void;
   done(): void;
 }
 
 /** Real-time length of the wave phase at 1× speed. */
-const WAVE_MS = 9000;
+const WAVE_MS = 10000;
 export const FINALE_MS = 2400;
 
 export class Show {
   speed = 1;
   private sim = 0;
+  /** Wave-phase progress 0→1 in real time; `sim` is an eased function of it. */
+  private p = 0;
   private tEnd = 1;
   private finaleMs = -1;
   private last = 0;
@@ -29,6 +31,7 @@ export class Show {
     this.stop();
     this.tEnd = tEnd;
     this.sim = 0;
+    this.p = 0;
     this.finaleMs = -1;
     this.running = true;
     this.last = performance.now();
@@ -40,8 +43,9 @@ export class Show {
 
   skip(): void {
     if (!this.running) return;
+    this.p = 1;
     this.sim = this.tEnd;
-    this.hooks.wave(this.sim);
+    this.hooks.wave(this.sim, 1);
     this.finaleMs = FINALE_MS;
     this.hooks.finale(FINALE_MS);
     this.finish();
@@ -62,10 +66,13 @@ export class Show {
     const dt = Math.min(64, now - this.last);
     this.last = now;
     if (this.finaleMs < 0) {
-      // Simulation time advances linearly, so slow roads visibly fill in slower.
-      this.sim = Math.min(this.tEnd, this.sim + (dt * this.speed * this.tEnd) / WAVE_MS);
-      this.hooks.wave(this.sim);
-      if (this.sim >= this.tEnd) this.finaleMs = 0;
+      // One global clock drives every wave, so at any instant each road fills in
+      // proportion to its real travel time (slow roads visibly lag). The clock
+      // itself eases in and out so the show starts and lands gently.
+      this.p = Math.min(1, this.p + (dt * this.speed) / WAVE_MS);
+      this.sim = this.tEnd * clockEase(this.p);
+      this.hooks.wave(this.sim, this.p);
+      if (this.p >= 1) this.finaleMs = 0;
     } else {
       this.finaleMs = Math.min(FINALE_MS, this.finaleMs + dt * Math.max(1, this.speed));
       this.hooks.finale(this.finaleMs);
@@ -74,6 +81,9 @@ export class Show {
     this.raf = requestAnimationFrame(this.tick);
   };
 }
+
+/** Mostly smoothstep with a linear share, so it never fully stalls at either end. */
+export const clockEase = (p: number) => 0.3 * p + 0.7 * p * p * (3 - 2 * p);
 
 export const easeOut = (x: number) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
 export const easeInOut = (x: number) => {

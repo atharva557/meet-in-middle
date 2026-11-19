@@ -1,5 +1,5 @@
 // Everything drawn on the map besides the wave layer: friend pins, candidate
-// venues (which light up once every wave has reached them), routes, winner pulse.
+// venues (which light up once every wave has reached them), winner pulse.
 import maplibregl, { type ExpressionSpecification, type GeoJSONSource, type Map as MLMap } from 'maplibre-gl';
 import type { WaveLayer } from './waveLayer.ts';
 import type { VenueResult } from '../worker/protocol.ts';
@@ -28,15 +28,7 @@ export function installLayers(map: MLMap, waves: WaveLayer): void {
       'circle-blur': ['case', lit, 0.35, 0],
     },
   });
-
-  map.addSource('routes', { type: 'geojson', data: EMPTY });
-  const lineLayout = { 'line-cap': 'round', 'line-join': 'round' } as const;
-  map.addLayer({ id: 'routes-glow', type: 'line', source: 'routes', layout: lineLayout,
-    paint: { 'line-color': ['get', 'color'], 'line-width': 14, 'line-blur': 10, 'line-opacity': 0.55 } });
-  map.addLayer({ id: 'routes-casing', type: 'line', source: 'routes', layout: lineLayout,
-    paint: { 'line-color': '#05060a', 'line-width': 7, 'line-opacity': 0.75 } });
-  map.addLayer({ id: 'routes-core', type: 'line', source: 'routes', layout: lineLayout,
-    paint: { 'line-color': ['get', 'color'], 'line-width': 3.5 } });
+  // Routes are drawn by the WaveLayer itself (smooth per-pixel reveal, no GeoJSON churn).
 }
 
 export function setDim(map: MLMap, opacity: number): void {
@@ -75,34 +67,6 @@ export class VenueLights {
     if (this.map.getSource('venues')) this.map.removeFeatureState({ source: 'venues' });
     this.cursor = 0;
   }
-}
-
-// ---------- Routes ----------
-
-export interface Route { color: string; coords: [number, number][]; times: number[] }
-
-/** Draws each route up to simulation time `t` (so routes "re-trace" the waves). */
-export function drawRoutes(map: MLMap, routes: Route[], t: number): void {
-  const features: GeoJSON.Feature[] = [];
-  for (const r of routes) {
-    const out: [number, number][] = [];
-    for (let i = 0; i < r.coords.length; i++) {
-      if (r.times[i] <= t) { out.push(r.coords[i]); continue; }
-      if (i > 0) {
-        // Interpolate the partial segment at the cut.
-        const f = (t - r.times[i - 1]) / Math.max(1e-6, r.times[i] - r.times[i - 1]);
-        const a = r.coords[i - 1], b = r.coords[i];
-        out.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]);
-      }
-      break;
-    }
-    if (out.length >= 2) features.push({ type: 'Feature', properties: { color: r.color }, geometry: { type: 'LineString', coordinates: out } });
-  }
-  (map.getSource('routes') as GeoJSONSource).setData({ type: 'FeatureCollection', features });
-}
-
-export function clearRoutes(map: MLMap): void {
-  (map.getSource('routes') as GeoJSONSource | undefined)?.setData(EMPTY);
 }
 
 // ---------- Markers ----------

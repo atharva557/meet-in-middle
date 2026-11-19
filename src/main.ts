@@ -11,11 +11,11 @@ import { rankVenues, type Mode } from './scoring.ts';
 import { decodeState, encodeState } from './share.ts';
 import { pathTo } from './graph/dijkstra.ts';
 import { metersBetween } from './graph/graph.ts';
-import { WaveLayer, SEG_STRIDE, hexToRgb, toMercator } from './render/waveLayer.ts';
+import { WaveLayer, SEG_STRIDE, hexToRgb, toMercator, type Route } from './render/waveLayer.ts';
 import {
-  FriendMarkers, VenueLights, WinnerMarker, clearRoutes, drawRoutes, installLayers, setDim, type Route,
+  FriendMarkers, VenueLights, WinnerMarker, installLayers, setDim,
 } from './render/overlays.ts';
-import { Show, easeInOut, easeOut } from './render/show.ts';
+import { FINALE_MS, Show, easeInOut, easeOut } from './render/show.ts';
 import type { ComputeRequest, ComputeResult, WorkerMessage } from './worker/protocol.ts';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -348,6 +348,7 @@ function applyChoice(refresh = true): void {
     return { color: people[i].color, coords, times };
   });
   run.tEnd = Math.max(...v.times) * 1.06 + 15;
+  waves.setRoutes(run.routes);
   updateHash(people);
 
   if (!refresh) return;
@@ -355,7 +356,7 @@ function applyChoice(refresh = true): void {
   if (phase === 'result') {
     venueLights.update(run.tEnd);
     waves.time = Math.max(waves.time, run.tEnd);
-    drawRoutes(map, run.routes, Infinity);
+    waves.routeTime = ROUTES_COMPLETE;
     winner.show(v);
     showCard();
     map.triggerRepaint();
@@ -379,31 +380,73 @@ function cameraPadding(panelOpen = false) {
     : { top: 110, bottom: Math.min(0.46 * h, 420) + 30, left: 30, right: 30 };
 }
 
+/** Large enough to draw every route in full. */
+const ROUTES_COMPLETE = 1e9;
+/** How far the camera slowly pushes in during the waves (zoom levels). */
+const DRIFT_ZOOM = 0.22;
+
+/** Everyone plus the winner: what the camera frames. */
+function showBounds(r: Run): maplibregl.LngLatBounds {
+  const v = r.res.venues[r.chosen];
+  const b = new maplibregl.LngLatBounds([v.lon, v.lat], [v.lon, v.lat]);
+  r.people.forEach((p) => b.extend([p.lon, p.lat]));
+  return b;
+}
+
+// Slow push-in toward the winner while the waves run. Any user pan/zoom cancels it.
+let drift: { z0: number; c0: maplibregl.MercatorCoordinate; at: maplibregl.MercatorCoordinate } | null = null;
+let userMovedCamera = false;
+map.on('movestart', (e) => { if ((e as { originalEvent?: Event }).originalEvent) { drift = null; userMovedCamera = true; } });
+
 function play(): void {
   if (!run) return;
   const r = run;
   setPhase('show');
   venueLights.reset();
-  clearRoutes(map);
   winner.hide();
   setDim(map, 0);
   waves.intensity = 1;
-  waves.fade = Math.max(40, r.tEnd * 0.08);
+  waves.fade = Math.max(40, r.tEnd * 0.07);
   waves.time = 0;
+  waves.routeTime = 0;
+  drift = null;
+  userMovedCamera = false;
 
-  // Frame everyone plus the winner.
-  const v = r.res.venues[r.chosen];
-  const b = new maplibregl.LngLatBounds([v.lon, v.lat], [v.lon, v.lat]);
-  r.people.forEach((p) => b.extend([p.lon, p.lat]));
   const fly = reducedMotion ? 0 : 900;
-  map.fitBounds(b, { padding: cameraPadding(), duration: fly, maxZoom: 15 });
+  const bounds = showBounds(r);
+  const padding = cameraPadding();
+  map.fitBounds(bounds, { padding, duration: fly, maxZoom: 15 });
+  // Drift starts from where the fly *ends*, not wherever the camera is when the timer fires.
+  const target = map.cameraForBounds(bounds, { padding, maxZoom: 15 });
 
   // Let the camera settle before the waves start; a replay cancels a pending start.
   show.stop();
   clearTimeout(startTimer);
-  startTimer = window.setTimeout(() => run === r && show.start(r.tEnd), fly);
+  startTimer = window.setTimeout(() => {
+    if (run !== r) return;
+    const v = r.res.venues[r.chosen];
+    if (!reducedMotion && !userMovedCamera && target?.center && target.zoom !== undefined) {
+      drift = {
+        z0: target.zoom,
+        c0: maplibregl.MercatorCoordinate.fromLngLat(target.center),
+        at: maplibregl.MercatorCoordinate.fromLngLat([v.lon, v.lat]),
+      };
+    }
+    show.start(r.tEnd);
+  }, fly);
 }
 let startTimer = 0;
+
+/** Zoom by `dz` around the winner, keeping it fixed on screen. */
+function applyDrift(dz: number): void {
+  if (!drift) return;
+  const k = Math.pow(2, -dz);
+  const c = new maplibregl.MercatorCoordinate(
+    drift.at.x + (drift.c0.x - drift.at.x) * k,
+    drift.at.y + (drift.c0.y - drift.at.y) * k,
+  );
+  map.jumpTo({ center: c.toLngLat(), zoom: drift.z0 + dz });
+}
 
 const counter = (orderTime: Float32Array, t: number) => {
   let lo = 0, hi = orderTime.length;
@@ -411,12 +454,13 @@ const counter = (orderTime: Float32Array, t: number) => {
   return lo;
 };
 
-let winnerShown = false, cardShown = false;
+let winnerShown = false, cardShown = false, finaleCamera = false;
 const show = new Show({
-  wave(sim) {
+  wave(sim, progress) {
     if (!run) return;
-    winnerShown = cardShown = false;
+    winnerShown = cardShown = finaleCamera = false;
     waves.time = sim;
+    applyDrift(DRIFT_ZOOM * easeInOut(progress));
     venueLights.update(sim);
     $('hud-time').textContent = String(Math.floor(sim / 60));
     let settled = 0;
@@ -426,15 +470,26 @@ const show = new Show({
   },
   finale(ms) {
     if (!run) return;
-    // 0–700ms: dim everything else.  150ms: winner pops.  300–1900ms: routes trace.  900ms: card.
-    const d = easeOut(ms / 700);
-    waves.intensity = 1 - 0.85 * d;
+    // 0–900ms: dim everything else.  200ms: winner pops.  250–2100ms: routes trace
+    // from each home to the venue.  1100ms: result card.  Camera eases to the final frame.
+    if (!finaleCamera) {
+      finaleCamera = true;
+      drift = null;
+      if (!userMovedCamera) {
+        map.fitBounds(showBounds(run), {
+          padding: cameraPadding(), maxZoom: 15,
+          duration: reducedMotion || ms >= FINALE_MS ? 0 : 1800, easing: easeInOut,
+        });
+      }
+    }
+    const d = easeOut(ms / 900);
+    waves.intensity = 1 - 0.8 * d;
     setDim(map, 0.5 * d);
-    if (ms >= 150 && !winnerShown) { winner.show(run.res.venues[run.chosen]); winnerShown = true; }
-    const p = easeInOut((ms - 300) / 1600);
+    if (ms >= 200 && !winnerShown) { winner.show(run.res.venues[run.chosen]); winnerShown = true; }
+    const p = easeInOut((ms - 250) / 1850);
     const tMax = Math.max(...run.routes.map((r) => r.times[r.times.length - 1]));
-    drawRoutes(map, run.routes, p >= 1 ? Infinity : p * tMax);
-    if (ms >= 900 && !cardShown) { setPhase('result'); showCard(); cardShown = true; }
+    waves.routeTime = p >= 1 ? ROUTES_COMPLETE : p * tMax;
+    if (ms >= 1100 && !cardShown) { setPhase('result'); showCard(); cardShown = true; }
     map.triggerRepaint();
   },
   done() {
@@ -494,3 +549,7 @@ panel.setMode(mode, setMode);
 panel.render();
 friendsChanged();
 if (shared && panel.located().length >= MIN_FRIENDS) void start();
+
+// Dev-only handle for inspecting frames (e.g. when rAF is throttled in a hidden tab).
+// Vite strips this block from production builds.
+if (import.meta.env.DEV) Object.assign(window, { __mitm: { map, waves, show, setDim } });
