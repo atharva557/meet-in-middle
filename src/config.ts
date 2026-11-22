@@ -70,6 +70,12 @@ export const PAD_KM = 2.5;
 /** How far a home / venue may be from the nearest drivable road. */
 export const SNAP_FRIEND_M = 600;
 export const SNAP_VENUE_M = 200;
+/**
+ * Speed (km/h, straight line) for the stretch between a home or venue and the road
+ * node it snapped to: lanes, driveways and parking that the road graph leaves out.
+ * Without it, someone 600 m from a road would get those 600 m for free.
+ */
+export const ACCESS_SPEED_KMH = 10;
 
 export const BASEMAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
 

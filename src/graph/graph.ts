@@ -1,6 +1,6 @@
 // Turns RoadData into a routable graph for one region:
 //   crop to a bbox → renumber nodes → directed CSR adjacency with travel-time weights,
-//   plus undirected "display segments" for the animation and a largest-component mask.
+//   plus undirected "display segments" for the animation and a largest-SCC mask.
 import type { BBox } from '../config.ts';
 import type { RoadData } from './osm.ts';
 
@@ -20,7 +20,7 @@ export interface Graph {
   segWf: Float32Array;
   segWb: Float32Array;
   segCls: Uint8Array;
-  /** 1 if the node is in the largest connected component (safe to snap to). */
+  /** 1 if the node is in the largest strongly-connected component (safe to snap to). */
   main: Uint8Array;
 }
 
@@ -86,26 +86,73 @@ export function buildGraph(rd: RoadData, box: BBox): Graph {
     if (segWb[i] >= 0) { const p = cursor[segV[i]]++; to[p] = segU[i]; wt[p] = segWb[i]; }
   }
 
-  // 4. Largest weakly-connected component (union-find), so we never snap a
-  //    friend or venue onto a road fragment that's cut off from everything else.
-  const uf = new Int32Array(nn);
-  for (let i = 0; i < nn; i++) uf[i] = i;
-  const find = (x: number): number => {
-    while (uf[x] !== x) { uf[x] = uf[uf[x]]; x = uf[x]; }
-    return x;
-  };
-  for (let i = 0; i < S; i++) {
-    const a = find(segU[i]), b = find(segV[i]);
-    if (a !== b) uf[a] = b;
-  }
-  const size = new Uint32Array(nn);
-  let best = 0;
-  for (let i = 0; i < nn; i++) {
-    const r = find(i);
-    if (++size[r] > size[best]) best = r;
-  }
-  const main = new Uint8Array(nn);
-  for (let i = 0; i < nn; i++) main[i] = find(i) === best ? 1 : 0;
+  // 4. Largest strongly-connected component. Snapping only onto it guarantees every
+  //    friend can drive to every venue and back; a merely *touching* (weakly connected)
+  //    road can still be a one-way trap you can enter but never leave.
+  const main = largestScc(nn, off, to);
 
   return { n: nn, lat, lon, off, to, w: wt, segU, segV, segWf, segWb, segCls, main };
+}
+
+/**
+ * Kosaraju's algorithm, iterative (a city graph is far too deep for recursion):
+ *   1. DFS the forward graph, recording nodes in post-order (finish time).
+ *   2. Walk the reversed graph from nodes in decreasing finish time; each walk
+ *      collects exactly one strongly-connected component.
+ * Returns a 0/1 mask of the largest component.
+ */
+export function largestScc(n: number, off: Uint32Array, to: Uint32Array): Uint8Array {
+  // Reverse CSR: for each node, the nodes with an edge into it.
+  const roff = new Uint32Array(n + 1);
+  for (let e = 0; e < to.length; e++) roff[to[e] + 1]++;
+  for (let i = 0; i < n; i++) roff[i + 1] += roff[i];
+  const rto = new Uint32Array(to.length);
+  const cur = roff.slice(0, n);
+  for (let u = 0; u < n; u++) for (let e = off[u]; e < off[u + 1]; e++) rto[cur[to[e]]++] = u;
+
+  // Pass 1: post-order of an iterative DFS (edge[u] = next outgoing edge to try).
+  const stack = new Uint32Array(n);
+  const edge = new Uint32Array(n);
+  const seen = new Uint8Array(n);
+  const post = new Uint32Array(n);
+  let pc = 0;
+  for (let s = 0; s < n; s++) {
+    if (seen[s]) continue;
+    let sp = 0;
+    stack[sp++] = s; seen[s] = 1; edge[s] = off[s];
+    while (sp > 0) {
+      const u = stack[sp - 1];
+      if (edge[u] < off[u + 1]) {
+        const v = to[edge[u]++];
+        if (!seen[v]) { seen[v] = 1; edge[v] = off[v]; stack[sp++] = v; }
+      } else {
+        sp--;
+        post[pc++] = u;
+      }
+    }
+  }
+
+  // Pass 2: components on the reversed graph, latest-finished first.
+  const comp = new Int32Array(n).fill(-1);
+  let best = -1, bestSize = 0, c = 0;
+  for (let k = n - 1; k >= 0; k--) {
+    const s = post[k];
+    if (comp[s] >= 0) continue;
+    let sp = 0, size = 0;
+    stack[sp++] = s; comp[s] = c;
+    while (sp > 0) {
+      const u = stack[--sp];
+      size++;
+      for (let e = roff[u]; e < roff[u + 1]; e++) {
+        const v = rto[e];
+        if (comp[v] < 0) { comp[v] = c; stack[sp++] = v; }
+      }
+    }
+    if (size > bestSize) { bestSize = size; best = c; }
+    c++;
+  }
+
+  const mask = new Uint8Array(n);
+  for (let i = 0; i < n; i++) mask[i] = comp[i] === best ? 1 : 0;
+  return mask;
 }

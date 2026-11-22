@@ -1,6 +1,8 @@
 // Routing worker: loads roads, builds the graph, runs one Dijkstra per friend,
 // and scores-ready venue travel times. Keeps the UI thread free for the map.
-import { CITY, OVERPASS_ENDPOINTS, SNAP_FRIEND_M, SNAP_VENUE_M, roadQuery, type BBox } from '../config.ts';
+import {
+  ACCESS_SPEED_KMH, CITY, OVERPASS_ENDPOINTS, SNAP_FRIEND_M, SNAP_VENUE_M, roadQuery, type BBox,
+} from '../config.ts';
 import { decodeRoadData } from '../graph/codec.ts';
 import { osmToRoadData, type RoadData } from '../graph/osm.ts';
 import { buildGraph } from '../graph/graph.ts';
@@ -65,6 +67,9 @@ async function loadOverpass(box: BBox, onStage: (s: string) => void): Promise<Ro
 
 // ---------- main computation ----------
 
+/** Time to cover the off-graph gap between a point and its snapped road node. */
+const accessSecs = (meters: number) => meters / (ACCESS_SPEED_KMH / 3.6);
+
 async function compute(req: ComputeRequest): Promise<ComputeResult> {
   const t: Record<string, number> = {};
   let t0 = performance.now();
@@ -115,7 +120,7 @@ async function compute(req: ComputeRequest): Promise<ComputeResult> {
   t0 = performance.now();
   const friends = snaps.map((s, i) => {
     stage(`Exploring roads from friend ${i + 1} of ${snaps.length}…`);
-    return { snapNode: s.node, snapMeters: s.meters, ...dijkstra(g, s.node) };
+    return { snapNode: s.node, snapMeters: s.meters, accessSecs: accessSecs(s.meters), ...dijkstra(g, s.node) };
   });
   t.dijkstra = performance.now() - t0;
 
@@ -133,7 +138,8 @@ async function compute(req: ComputeRequest): Promise<ComputeResult> {
     if (v.lat < s || v.lat > n || v.lon < w || v.lon > e) continue;
     const snap = grid.nearest(v.lat, v.lon, SNAP_VENUE_M);
     if (!snap) continue;
-    const times = friends.map((f) => f.dist[snap.node]);
+    const venueAccess = accessSecs(snap.meters);
+    const times = friends.map((f) => f.accessSecs + f.dist[snap.node] + venueAccess);
     if (times.every(Number.isFinite)) venues.push({ ...v, node: snap.node, times });
   }
   if (venues.length === 0) throw new RouteError('no-venues', 'No cafes, restaurants or malls are reachable by everyone here.');

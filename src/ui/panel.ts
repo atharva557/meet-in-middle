@@ -49,13 +49,16 @@ export class Panel {
   private list = $<HTMLOListElement>('#friend-list');
   private goBtn = $<HTMLButtonElement>('#go');
   private addBtn = $<HTMLButtonElement>('#add-friend');
+  private demoBtn = $<HTMLButtonElement>('#demo');
   private errEl = $<HTMLParagraphElement>('#panel-error');
+  /** True while a route search is running; survives re-renders. */
+  private busy = false;
   pickingId: number | null = null;
 
   constructor(private hooks: PanelHooks) {
     this.addBtn.onclick = () => { this.add(); this.render(); this.focusLast(); hooks.onChange(); };
     this.goBtn.onclick = () => hooks.onRun();
-    $<HTMLButtonElement>('#demo').onclick = () => hooks.onDemo();
+    this.demoBtn.onclick = () => hooks.onDemo();
   }
 
   add(init: Partial<Friend> = {}): Friend {
@@ -100,6 +103,8 @@ export class Panel {
   }
 
   setBusy(busy: boolean): void {
+    this.busy = busy;
+    this.demoBtn.disabled = busy;
     this.goBtn.disabled = busy || this.located().length < MIN_FRIENDS;
     this.goBtn.textContent = busy ? 'Working…' : 'Find the fair middle';
   }
@@ -120,7 +125,7 @@ export class Panel {
       this.patchRow(row, f);
     });
     this.addBtn.disabled = this.friends.length >= MAX_FRIENDS;
-    this.setBusy(false);
+    this.setBusy(this.busy);
   }
 
   private patchRow(row: HTMLLIElement, f: Friend): void {

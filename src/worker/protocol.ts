@@ -14,6 +14,9 @@ export interface ComputeRequest {
 export interface FriendRoute {
   snapNode: number;
   snapMeters: number;
+  /** Seconds from home to `snapNode`; already included in every venue time. */
+  accessSecs: number;
+  /** Road-only travel time from `snapNode` (excludes `accessSecs`). */
   dist: Float32Array;
   parent: Int32Array;
   /** Settle order + times, straight from Dijkstra. */
@@ -27,7 +30,7 @@ export interface VenueResult {
   lat: number;
   lon: number;
   node: number;
-  /** Driving seconds for each friend, same order as the request. */
+  /** Door-to-door seconds for each friend (home access + roads + venue access). */
   times: number[];
 }
 

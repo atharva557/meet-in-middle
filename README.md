@@ -18,7 +18,7 @@ npm run build      # static site in dist/ (no backend)
 |---|---|---|
 | Input | `src/ui/panel.ts`, `src/geo/geocode.ts` | Nominatim search (bounded to Ahmedabad, search-on-submit, ≤1 req/s) or drop a pin. |
 | Roads | `public/data/ahmedabad.bin` | Pre-baked city graph (see below). Live Overpass with mirror fallback is used only when friends are outside the baked area. |
-| Graph | `src/graph/graph.ts` | Crop to padded bbox → CSR adjacency. Edge weight = length ÷ speed, speed from `maxspeed` (×0.75 for traffic) or per-class defaults; `oneway`, roundabouts and motorways respected. Union-find keeps snapping on the largest connected component. |
+| Graph | `src/graph/graph.ts` | Crop to padded bbox → CSR adjacency. Edge weight = length ÷ speed, speed from `maxspeed` (×0.75 for traffic) or per-class defaults; `oneway`, roundabouts and motorways respected. Homes and venues snap only onto the largest *strongly* connected component (Kosaraju), so no one lands in a one-way trap; the off-road gap to the snapped node is charged at `ACCESS_SPEED_KMH`. |
 | Dijkstra | `src/graph/dijkstra.ts`, `src/graph/heap.ts` | Hand-written binary heap with lazy deletion. Records settle order + time and parent pointers. One run per friend, in a Web Worker. |
 | Scoring | `src/scoring.ts` | Three fairness modes over the venue × friend travel-time matrix. Switching mode only re-sorts, with no new graph search. |
 | Animation | `src/render/waveLayer.ts` | One MapLibre custom WebGL layer. Each road segment is an instanced quad carrying every friend's arrival time at both ends; the fragment shader reveals the wave where `arrival ≤ u_time`, with additive blending so overlapping friends mix toward white. |

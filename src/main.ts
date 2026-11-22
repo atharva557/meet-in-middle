@@ -116,6 +116,9 @@ function setMode(m: Mode): void {
     run.chosen = run.ranked[0];
     applyChoice();
   }
+  // While editing, the last run's group may be out of date: the link follows the panel.
+  const showing = phase === 'show' || phase === 'result';
+  updateHash(run && showing ? run.people : panel.located() as Located[]);
 }
 
 // Pin-drop mode: next map click places the selected friend.
@@ -219,8 +222,15 @@ function compute(req: Omit<ComputeRequest, 'id' | 'type'>): Promise<WorkerMessag
 
 const kmBetween = (a: number, b: number, c: number, d: number) => metersBetween(a, b, c, d) / 1000;
 
+/** Identifies a set of locations: equal keys mean the same graph search. */
+const locKey = (fs: { lat?: number; lon?: number }[]) =>
+  fs.map((f) => `${f.lat!.toFixed(5)},${f.lon!.toFixed(5)}`).join('|');
+
 async function start(): Promise<void> {
-  const people = panel.located() as Located[];
+  // One search at a time; a newer request is picked up when the current one returns.
+  if (phase === 'loading') return;
+  // Snapshot: the panel stays editable while the worker runs, so never hold its live objects.
+  const people = panel.located().map((f) => ({ ...f })) as Located[];
   if (people.length < MIN_FRIENDS) { panel.setError('Add at least two friends with a location.'); return; }
   setPicking(null);
 
@@ -238,9 +248,9 @@ async function start(): Promise<void> {
   const padLon = Math.max(PAD_FRACTION * (e - w), PAD_KM / (111 * Math.cos((s * Math.PI) / 180)));
   const region: BBox = [s - padLat, w - padLon, n + padLat, e + padLon];
 
-  const key = people.map((f) => `${f.lat.toFixed(5)},${f.lon.toFixed(5)}`).join('|');
+  const key = locKey(people);
   updateHash(people);
-  people.forEach((f) => (f.error = undefined));
+  panel.friends.forEach((f) => (f.error = undefined));
 
   // Same locations as last time? Reuse the graph search, just re-rank and replay.
   if (run && run.key === key) {
@@ -268,10 +278,17 @@ async function start(): Promise<void> {
     mapReady,
   ]);
 
+  // Someone was moved, added or removed while we were routing: this answer is stale.
+  if (locKey(panel.located()) !== key) {
+    setPhase('edit');
+    return start();
+  }
+
   if (msg.type === 'error') {
     setPhase('edit');
     const who = msg.friendIndex !== undefined ? people[msg.friendIndex] : undefined;
-    if (who) who.error = msg.message;
+    const live = who && panel.friends.find((f) => f.id === who.id);
+    if (live) live.error = msg.message;
     panel.render();
     const prefix = who ? `${who.name}: ` : '';
     panel.setError(
@@ -309,13 +326,14 @@ function prepare(res: ComputeResult, key: string, people: Located[]): void {
     segs[o + 6] = CLASS_WIDTH[res.segCls[k]];
   }
 
-  // Per friend: arrival times at both ends of every segment.
+  // Per friend: arrival times at both ends of every segment, counted from their front
+  // door, so the wave reaches a venue exactly when the scored time says it does.
   const times = res.friends.map((f) => {
     const t = new Float32Array(S * 2);
     for (let k = 0; k < S; k++) {
       const du = f.dist[seg[2 * k]], dv = f.dist[seg[2 * k + 1]];
-      t[2 * k] = Number.isFinite(du) ? du : 1e7;
-      t[2 * k + 1] = Number.isFinite(dv) ? dv : 1e7;
+      t[2 * k] = Number.isFinite(du) ? f.accessSecs + du : 1e7;
+      t[2 * k + 1] = Number.isFinite(dv) ? f.accessSecs + dv : 1e7;
     }
     return t;
   });
@@ -342,14 +360,13 @@ function applyChoice(refresh = true): void {
     const path = pathTo(f.parent, v.node);
     const coords: [number, number][] = [[people[i].lon, people[i].lat]];
     const times = [0];
-    for (const node of path) { coords.push([res.coords[2 * node], res.coords[2 * node + 1]]); times.push(f.dist[node]); }
+    for (const node of path) { coords.push([res.coords[2 * node], res.coords[2 * node + 1]]); times.push(f.accessSecs + f.dist[node]); }
     coords.push([v.lon, v.lat]);
-    times.push(f.dist[v.node]);
+    times.push(v.times[i]);
     return { color: people[i].color, coords, times };
   });
   run.tEnd = Math.max(...v.times) * 1.06 + 15;
   waves.setRoutes(run.routes);
-  updateHash(people);
 
   if (!refresh) return;
   if (phase === 'show') { show.retarget(run.tEnd); return; }
@@ -464,7 +481,7 @@ const show = new Show({
     venueLights.update(sim);
     $('hud-time').textContent = String(Math.floor(sim / 60));
     let settled = 0;
-    for (const f of run.res.friends) settled += counter(f.orderTime, sim);
+    for (const f of run.res.friends) settled += counter(f.orderTime, sim - f.accessSecs);
     $('hud-nodes').textContent = settled.toLocaleString('en-IN');
     map.triggerRepaint();
   },
